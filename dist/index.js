@@ -5476,9 +5476,9 @@ class GitCommandManager {
     submoduleUpdate(fetchDepth, recursive, config) {
         return __awaiter(this, void 0, void 0, function* () {
             const args = ['-c', 'protocol.version=2'];
-            // Object.keys(config || {}).forEach(key =>
-            //   args.push('-c', `${key}=${config[key]}`)
-            // )
+            for (const key of Object.keys(config)) {
+                args.push('-c', `${key}=${config[key]}`);
+            }
             args.push('submodule', 'update', '--init', '--force');
             if (fetchDepth > 0) {
                 args.push(`--depth=${fetchDepth}`);
