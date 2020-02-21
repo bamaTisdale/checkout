@@ -12,10 +12,10 @@ import {IGitSourceSettings} from './git-source-settings'
 
 const IS_WINDOWS = process.platform === 'win32'
 const HOSTNAME = 'github.com'
-const EXTRA_HEADER_KEY = `http.https://${HOSTNAME}/.extraheader`
-const SSH_COMMAND_KEY = 'core.sshCommand'
 
 export interface IGitAuthHelper {
+  readonly tokenConfigKey: string
+  readonly tokenConfigValue: string
   configureAuth(): Promise<void>
   removeAuth(): Promise<void>
 }
@@ -28,10 +28,15 @@ export function createAuthHelper(
 }
 
 class GitAuthHelper {
-  private git: IGitCommandManager
-  private settings: IGitSourceSettings
+  private readonly git: IGitCommandManager
+  private readonly settings: IGitSourceSettings
+  private readonly sshCommandConfigKey = 'core.sshCommand'
+  private readonly tokenPlaceholderConfigValue: string
   private sshKeyPath = ''
   private sshKnownHostsPath = ''
+
+  readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
+  readonly tokenConfigValue: string
 
   constructor(
     gitCommandManager: IGitCommandManager,
@@ -39,6 +44,15 @@ class GitAuthHelper {
   ) {
     this.git = gitCommandManager
     this.settings = gitSourceSettings || (({} as unknown) as IGitSourceSettings)
+
+    // Token auth header
+    const basicCredential = Buffer.from(
+      `x-access-token:${this.settings.authToken}`,
+      'utf8'
+    ).toString('base64')
+    core.setSecret(basicCredential)
+    this.tokenPlaceholderConfigValue = `AUTHORIZATION: basic ***`
+    this.tokenConfigValue = `AUTHORIZATION: basic ${basicCredential}`
   }
 
   async configureAuth(): Promise<void> {
@@ -119,7 +133,7 @@ class GitAuthHelper {
 
     // Configure core.sshCommand
     if (this.settings.persistCredentials) {
-      await this.git.config(SSH_COMMAND_KEY, sshCommand)
+      await this.git.config(this.sshCommandConfigKey, sshCommand)
     }
   }
 
@@ -127,15 +141,7 @@ class GitAuthHelper {
     // Configure a placeholder value. This approach avoids the credential being captured
     // by process creation audit events, which are commonly logged. For more information,
     // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
-    const placeholder = `AUTHORIZATION: basic ***`
-    await this.git.config(EXTRA_HEADER_KEY, placeholder)
-
-    // Determine the basic credential value
-    const basicCredential = Buffer.from(
-      `x-access-token:${this.settings.authToken}`,
-      'utf8'
-    ).toString('base64')
-    core.setSecret(basicCredential)
+    await this.git.config(this.tokenConfigKey, this.tokenPlaceholderConfigValue)
 
     // Replace the value in the config file
     const configPath = path.join(
@@ -144,16 +150,16 @@ class GitAuthHelper {
       'config'
     )
     let content = (await fs.promises.readFile(configPath)).toString()
-    const placeholderIndex = content.indexOf(placeholder)
+    const placeholderIndex = content.indexOf(this.tokenPlaceholderConfigValue)
     if (
       placeholderIndex < 0 ||
-      placeholderIndex != content.lastIndexOf(placeholder)
+      placeholderIndex != content.lastIndexOf(this.tokenPlaceholderConfigValue)
     ) {
       throw new Error('Unable to replace auth placeholder in .git/config')
     }
     content = content.replace(
-      placeholder,
-      `AUTHORIZATION: basic ${basicCredential}`
+      this.tokenPlaceholderConfigValue,
+      this.tokenConfigValue
     )
     await fs.promises.writeFile(configPath, content)
   }
@@ -181,12 +187,12 @@ class GitAuthHelper {
     }
 
     // SSH command
-    await this.removeGitConfig(SSH_COMMAND_KEY)
+    await this.removeGitConfig(this.sshCommandConfigKey)
   }
 
   private async removeToken(): Promise<void> {
     // HTTP extra header
-    await this.removeGitConfig(EXTRA_HEADER_KEY)
+    await this.removeGitConfig(this.tokenConfigKey)
   }
 
   private async removeGitConfig(configKey: string): Promise<void> {

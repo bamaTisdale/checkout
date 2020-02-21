@@ -5111,18 +5111,23 @@ const stateHelper = __importStar(__webpack_require__(153));
 const v4_1 = __importDefault(__webpack_require__(826));
 const IS_WINDOWS = process.platform === 'win32';
 const HOSTNAME = 'github.com';
-const EXTRA_HEADER_KEY = `http.https://${HOSTNAME}/.extraheader`;
-const SSH_COMMAND_KEY = 'core.sshCommand';
 function createAuthHelper(git, settings) {
     return new GitAuthHelper(git, settings);
 }
 exports.createAuthHelper = createAuthHelper;
 class GitAuthHelper {
     constructor(gitCommandManager, gitSourceSettings) {
+        this.sshCommandConfigKey = 'core.sshCommand';
         this.sshKeyPath = '';
         this.sshKnownHostsPath = '';
+        this.tokenConfigKey = `http.https://${HOSTNAME}/.extraheader`;
         this.git = gitCommandManager;
         this.settings = gitSourceSettings || {};
+        // Token auth header
+        const basicCredential = Buffer.from(`x-access-token:${this.settings.authToken}`, 'utf8').toString('base64');
+        core.setSecret(basicCredential);
+        this.tokenPlaceholderConfigValue = `AUTHORIZATION: basic ***`;
+        this.tokenConfigValue = `AUTHORIZATION: basic ${basicCredential}`;
     }
     configureAuth() {
         return __awaiter(this, void 0, void 0, function* () {
@@ -5190,7 +5195,7 @@ class GitAuthHelper {
             this.git.setEnvironmentVariable('GIT_SSH_COMMAND', sshCommand);
             // Configure core.sshCommand
             if (this.settings.persistCredentials) {
-                yield this.git.config(SSH_COMMAND_KEY, sshCommand);
+                yield this.git.config(this.sshCommandConfigKey, sshCommand);
             }
         });
     }
@@ -5199,20 +5204,16 @@ class GitAuthHelper {
             // Configure a placeholder value. This approach avoids the credential being captured
             // by process creation audit events, which are commonly logged. For more information,
             // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
-            const placeholder = `AUTHORIZATION: basic ***`;
-            yield this.git.config(EXTRA_HEADER_KEY, placeholder);
-            // Determine the basic credential value
-            const basicCredential = Buffer.from(`x-access-token:${this.settings.authToken}`, 'utf8').toString('base64');
-            core.setSecret(basicCredential);
+            yield this.git.config(this.tokenConfigKey, this.tokenPlaceholderConfigValue);
             // Replace the value in the config file
             const configPath = path.join(this.git.getWorkingDirectory(), '.git', 'config');
             let content = (yield fs.promises.readFile(configPath)).toString();
-            const placeholderIndex = content.indexOf(placeholder);
+            const placeholderIndex = content.indexOf(this.tokenPlaceholderConfigValue);
             if (placeholderIndex < 0 ||
-                placeholderIndex != content.lastIndexOf(placeholder)) {
+                placeholderIndex != content.lastIndexOf(this.tokenPlaceholderConfigValue)) {
                 throw new Error('Unable to replace auth placeholder in .git/config');
             }
-            content = content.replace(placeholder, `AUTHORIZATION: basic ${basicCredential}`);
+            content = content.replace(this.tokenPlaceholderConfigValue, this.tokenConfigValue);
             yield fs.promises.writeFile(configPath, content);
         });
     }
@@ -5239,13 +5240,13 @@ class GitAuthHelper {
                 }
             }
             // SSH command
-            yield this.removeGitConfig(SSH_COMMAND_KEY);
+            yield this.removeGitConfig(this.sshCommandConfigKey);
         });
     }
     removeToken() {
         return __awaiter(this, void 0, void 0, function* () {
             // HTTP extra header
-            yield this.removeGitConfig(EXTRA_HEADER_KEY);
+            yield this.removeGitConfig(this.tokenConfigKey);
         });
     }
     removeGitConfig(configKey) {
@@ -5462,6 +5463,29 @@ class GitCommandManager {
     }
     setEnvironmentVariable(name, value) {
         this.gitEnv[name] = value;
+    }
+    submoduleSync(recursive) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const args = ['submodule', 'sync'];
+            if (recursive) {
+                args.push('--recursive');
+            }
+            yield this.execGit(args);
+        });
+    }
+    submoduleUpdate(fetchDepth, recursive, config) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const args = ['-c', 'protocol.version=2'];
+            Object.keys(config || {}).forEach(key => args.push('-c', `${key}=${config[key]}`));
+            args.push('submodule', 'update', '--init', '--force');
+            if (fetchDepth > 0) {
+                args.push(`--depth=${fetchDepth}`);
+            }
+            if (recursive) {
+                args.push('--recursive');
+            }
+            yield this.execGit(args);
+        });
     }
     tagExists(pattern) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -5704,6 +5728,16 @@ function getSource(settings) {
                 }
                 // Checkout
                 yield git.checkout(checkoutInfo.ref, checkoutInfo.startPoint);
+                // Submodules
+                if (settings.submodules) {
+                    yield git.submoduleSync(settings.nestedSubmodules);
+                    const extraConfig = {};
+                    extraConfig[authHelper.tokenConfigKey] = authHelper.tokenConfigValue;
+                    yield git.submoduleUpdate(settings.fetchDepth, settings.nestedSubmodules, extraConfig);
+                    // if (settings.persistCredentials) {
+                    //   // await git.submoduleForeach
+                    // }
+                }
                 // Dump some info about the checked out commit
                 yield git.log1();
             }
@@ -13863,6 +13897,19 @@ function getInputs() {
     // LFS
     result.lfs = (core.getInput('lfs') || 'false').toUpperCase() === 'TRUE';
     core.debug(`lfs = ${result.lfs}`);
+    // Submodules
+    result.submodules = false;
+    result.nestedSubmodules = false;
+    const submodulesString = (core.getInput('submodules') || '').toUpperCase();
+    if (submodulesString == 'RECURSIVE') {
+        result.submodules = true;
+        result.nestedSubmodules = true;
+    }
+    else if (submodulesString == 'TRUE') {
+        result.submodules = true;
+    }
+    core.debug(`submodules = ${result.submodules}`);
+    core.debug(`recursive submodules = ${result.nestedSubmodules}`);
     // Auth token
     result.authToken = core.getInput('token');
     // SSH
