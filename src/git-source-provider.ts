@@ -125,9 +125,9 @@ export async function getSource(settings: IGitSourceSettings): Promise<void> {
           settings.nestedSubmodules,
           extraConfig
         )
-        // if (settings.persistCredentials) {
-        //   // await git.submoduleForeach
-        // }
+        if (settings.persistCredentials) {
+          await git.submoduleForeach(`git config "${authHelper.tokenConfigKey}" "${authHelper.tokenConfigValue}"`, settings.nestedSubmodules)
+        }
       }
 
       // Dump some info about the checked out commit

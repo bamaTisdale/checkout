@@ -27,6 +27,7 @@ export interface IGitCommandManager {
   log1(): Promise<void>
   remoteAdd(remoteName: string, remoteUrl: string): Promise<void>
   setEnvironmentVariable(name: string, value: string): void
+  submoduleForeach(command: string, recursive: boolean): Promise<void>
   submoduleSync(recursive: boolean): Promise<void>
   submoduleUpdate(
     fetchDepth: number,
@@ -216,6 +217,16 @@ class GitCommandManager {
 
   setEnvironmentVariable(name: string, value: string): void {
     this.gitEnv[name] = value
+  }
+
+  async submoduleForeach(command: string, recursive: boolean) {
+    const args = ['submodule', 'foreach']
+    if (recursive) {
+      args.push('--recursive')
+    }
+    args.push(command)
+
+    await this.execGit(args)
   }
 
   async submoduleSync(recursive: boolean) {

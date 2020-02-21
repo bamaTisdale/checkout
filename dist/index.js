@@ -5464,6 +5464,16 @@ class GitCommandManager {
     setEnvironmentVariable(name, value) {
         this.gitEnv[name] = value;
     }
+    submoduleForeach(command, recursive) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const args = ['submodule', 'foreach'];
+            if (recursive) {
+                args.push('--recursive');
+            }
+            args.push(command);
+            yield this.execGit(args);
+        });
+    }
     submoduleSync(recursive) {
         return __awaiter(this, void 0, void 0, function* () {
             const args = ['submodule', 'sync'];
@@ -5736,9 +5746,9 @@ function getSource(settings) {
                     const extraConfig = {};
                     extraConfig[authHelper.tokenConfigKey] = authHelper.tokenConfigValue;
                     yield git.submoduleUpdate(settings.fetchDepth, settings.nestedSubmodules, extraConfig);
-                    // if (settings.persistCredentials) {
-                    //   // await git.submoduleForeach
-                    // }
+                    if (settings.persistCredentials) {
+                        yield git.submoduleForeach(`git config "${authHelper.tokenConfigKey}" "${authHelper.tokenConfigValue}"`, settings.nestedSubmodules);
+                    }
                 }
                 // Dump some info about the checked out commit
                 yield git.log1();
