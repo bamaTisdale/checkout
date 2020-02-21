@@ -233,9 +233,9 @@ class GitCommandManager {
     config: {[key: string]: string}
   ) {
     const args = ['-c', 'protocol.version=2']
-    Object.keys(config || {}).forEach(key =>
-      args.push('-c', `${key}=${config[key]}`)
-    )
+    // Object.keys(config || {}).forEach(key =>
+    //   args.push('-c', `${key}=${config[key]}`)
+    // )
     args.push('submodule', 'update', '--init', '--force')
     if (fetchDepth > 0) {
       args.push(`--depth=${fetchDepth}`)
