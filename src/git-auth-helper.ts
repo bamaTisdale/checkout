@@ -81,15 +81,14 @@ class GitAuthHelper {
     // Copy the global git config
     const gitConfigPath = path.join(os.homedir(), '.gitconfig')
     const newGitConfigPath = path.join(this.temporaryHomePath, '.gitconfig')
-    let configExists: boolean
+    let configExists = false
     try {
       await fs.promises.stat(gitConfigPath)
       configExists = true
     } catch (err) {
-      if (err.code === 'ENOENT') {
-        configExists = false
+      if (err.code !== 'ENOENT') {
+        throw err
       }
-      throw err
     }
     if (configExists) {
       await io.cp(gitConfigPath, newGitConfigPath)

@@ -5152,16 +5152,15 @@ class GitAuthHelper {
             // Copy the global git config
             const gitConfigPath = path.join(os.homedir(), '.gitconfig');
             const newGitConfigPath = path.join(this.temporaryHomePath, '.gitconfig');
-            let configExists;
+            let configExists = false;
             try {
                 yield fs.promises.stat(gitConfigPath);
                 configExists = true;
             }
             catch (err) {
-                if (err.code === 'ENOENT') {
-                    configExists = false;
+                if (err.code !== 'ENOENT') {
+                    throw err;
                 }
-                throw err;
             }
             if (configExists) {
                 yield io.cp(gitConfigPath, newGitConfigPath);
