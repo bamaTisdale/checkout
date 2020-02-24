@@ -99,15 +99,13 @@ class GitAuthHelper {
     }
 
     // Configure the token
-    this.git.setEnvironmentVariable('HOME', this.temporaryHomePath)
     try {
+      this.git.setEnvironmentVariable('HOME', this.temporaryHomePath)
       await this.configureToken(newGitConfigPath, true)
     } catch (err) {
-      // Unset in case written to the real global config
+      // Unset in case somehow written to the real global config
       await this.git.tryConfigUnset(this.tokenConfigKey, true)
       throw err
-    } finally {
-      this.git.removeEnvironmentVariable('HOME')
     }
   }
 

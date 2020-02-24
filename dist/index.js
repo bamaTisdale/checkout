@@ -5171,17 +5171,14 @@ class GitAuthHelper {
                 yield fs.promises.writeFile(newGitConfigPath, '');
             }
             // Configure the token
-            this.git.setEnvironmentVariable('HOME', this.temporaryHomePath);
             try {
+                this.git.setEnvironmentVariable('HOME', this.temporaryHomePath);
                 yield this.configureToken(newGitConfigPath, true);
             }
             catch (err) {
-                // Unset in case written to the real global config
+                // Unset in case somehow written to the real global config
                 yield this.git.tryConfigUnset(this.tokenConfigKey, true);
                 throw err;
-            }
-            finally {
-                this.git.removeEnvironmentVariable('HOME');
             }
         });
     }
