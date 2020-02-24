@@ -14,8 +14,8 @@ const IS_WINDOWS = process.platform === 'win32'
 const HOSTNAME = 'github.com'
 
 export interface IGitAuthHelper {
-  readonly tokenConfigKey: string
-  readonly tokenConfigValue: string
+  // readonly tokenConfigKey: string
+  // readonly tokenConfigValue: string
   configureAuth(): Promise<void>
   configureGlobalAuth(): Promise<void>
   configureSubmoduleAuth(): Promise<void>
@@ -40,8 +40,10 @@ class GitAuthHelper {
   private sshKnownHostsPath = ''
   private temporaryHomePath = ''
 
-  readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
-  readonly tokenConfigValue: string
+  // readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
+  // readonly tokenConfigValue: string
+  private readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
+  private tokenConfigValue: string
 
   constructor(
     gitCommandManager: IGitCommandManager,

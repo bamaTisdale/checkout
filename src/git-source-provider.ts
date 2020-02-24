@@ -125,12 +125,12 @@ export async function getSource(settings: IGitSourceSettings): Promise<void> {
 
         // Checkout submodules
         await git.submoduleSync(settings.nestedSubmodules)
-        const extraConfig: {[key: string]: string} = {}
-        extraConfig[authHelper.tokenConfigKey] = authHelper.tokenConfigValue
+        // const extraConfig: {[key: string]: string} = {}
+        // extraConfig[authHelper.tokenConfigKey] = authHelper.tokenConfigValue
         await git.submoduleUpdate(
           settings.fetchDepth,
           settings.nestedSubmodules,
-          extraConfig
+          // extraConfig
         )
         await git.submoduleForeach(
           'git config --local gc.auto 0',

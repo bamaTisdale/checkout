@@ -5122,6 +5122,8 @@ class GitAuthHelper {
         this.sshKeyPath = '';
         this.sshKnownHostsPath = '';
         this.temporaryHomePath = '';
+        // readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
+        // readonly tokenConfigValue: string
         this.tokenConfigKey = `http.https://${HOSTNAME}/.extraheader`;
         this.git = gitCommandManager;
         this.settings = gitSourceSettings || {};
@@ -5556,12 +5558,12 @@ class GitCommandManager {
             yield this.execGit(args);
         });
     }
-    submoduleUpdate(fetchDepth, recursive, config) {
+    submoduleUpdate(fetchDepth, recursive) {
         return __awaiter(this, void 0, void 0, function* () {
             const args = ['-c', 'protocol.version=2'];
-            for (const key of Object.keys(config)) {
-                args.push('-c', `${key}=${config[key]}`);
-            }
+            // for (const key of Object.keys(config)) {
+            //   args.push('-c', `${key}=${config[key]}`)
+            // }
             args.push('submodule', 'update', '--init', '--force');
             if (fetchDepth > 0) {
                 args.push(`--depth=${fetchDepth}`);
@@ -5825,9 +5827,9 @@ function getSource(settings) {
                     yield authHelper.configureGlobalAuth();
                     // Checkout submodules
                     yield git.submoduleSync(settings.nestedSubmodules);
-                    const extraConfig = {};
-                    extraConfig[authHelper.tokenConfigKey] = authHelper.tokenConfigValue;
-                    yield git.submoduleUpdate(settings.fetchDepth, settings.nestedSubmodules, extraConfig);
+                    // const extraConfig: {[key: string]: string} = {}
+                    // extraConfig[authHelper.tokenConfigKey] = authHelper.tokenConfigValue
+                    yield git.submoduleUpdate(settings.fetchDepth, settings.nestedSubmodules);
                     yield git.submoduleForeach('git config --local gc.auto 0', settings.nestedSubmodules);
                     // Persist credentials
                     if (settings.persistCredentials) {

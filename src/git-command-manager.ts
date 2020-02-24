@@ -36,8 +36,7 @@ export interface IGitCommandManager {
   submoduleSync(recursive: boolean): Promise<void>
   submoduleUpdate(
     fetchDepth: number,
-    recursive: boolean,
-    config: {[key: string]: string}
+    recursive: boolean
   ): Promise<void>
   tagExists(pattern: string): Promise<boolean>
   tryClean(): Promise<boolean>
@@ -258,13 +257,12 @@ class GitCommandManager {
 
   async submoduleUpdate(
     fetchDepth: number,
-    recursive: boolean,
-    config: {[key: string]: string}
+    recursive: boolean
   ) {
     const args = ['-c', 'protocol.version=2']
-    for (const key of Object.keys(config)) {
-      args.push('-c', `${key}=${config[key]}`)
-    }
+    // for (const key of Object.keys(config)) {
+    //   args.push('-c', `${key}=${config[key]}`)
+    // }
     args.push('submodule', 'update', '--init', '--force')
     if (fetchDepth > 0) {
       args.push(`--depth=${fetchDepth}`)
