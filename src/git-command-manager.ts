@@ -16,7 +16,11 @@ export interface IGitCommandManager {
   branchList(remote: boolean): Promise<string[]>
   checkout(ref: string, startPoint: string): Promise<void>
   checkoutDetach(): Promise<void>
-  config(configKey: string, configValue: string): Promise<void>
+  config(
+    configKey: string,
+    configValue: string,
+    globalConfig?: boolean
+  ): Promise<void>
   configExists(configKey: string): Promise<boolean>
   fetch(fetchDepth: number, refSpec: string[]): Promise<void>
   getWorkingDirectory(): string
@@ -26,6 +30,7 @@ export interface IGitCommandManager {
   lfsInstall(): Promise<void>
   log1(): Promise<void>
   remoteAdd(remoteName: string, remoteUrl: string): Promise<void>
+  removeEnvironmentVariable(name: string): void
   setEnvironmentVariable(name: string, value: string): void
   submoduleForeach(command: string, recursive: boolean): Promise<void>
   submoduleSync(recursive: boolean): Promise<void>
@@ -36,7 +41,7 @@ export interface IGitCommandManager {
   ): Promise<void>
   tagExists(pattern: string): Promise<boolean>
   tryClean(): Promise<boolean>
-  tryConfigUnset(configKey: string): Promise<boolean>
+  tryConfigUnset(configKey: string, globalConfig?: boolean): Promise<boolean>
   tryDisableAutomaticGarbageCollection(): Promise<boolean>
   tryGetFetchUrl(): Promise<string>
   tryReset(): Promise<boolean>
@@ -131,8 +136,17 @@ class GitCommandManager {
     await this.execGit(args)
   }
 
-  async config(configKey: string, configValue: string): Promise<void> {
-    await this.execGit(['config', '--local', configKey, configValue])
+  async config(
+    configKey: string,
+    configValue: string,
+    globalConfig?: boolean
+  ): Promise<void> {
+    await this.execGit([
+      'config',
+      globalConfig ? '--global' : '--local',
+      configKey,
+      configValue
+    ])
   }
 
   async configExists(configKey: string): Promise<boolean> {
@@ -215,6 +229,10 @@ class GitCommandManager {
     await this.execGit(['remote', 'add', remoteName, remoteUrl])
   }
 
+  removeEnvironmentVariable(name: string): void {
+    delete this.gitEnv[name]
+  }
+
   setEnvironmentVariable(name: string, value: string): void {
     this.gitEnv[name] = value
   }
@@ -269,9 +287,17 @@ class GitCommandManager {
     return output.exitCode === 0
   }
 
-  async tryConfigUnset(configKey: string): Promise<boolean> {
+  async tryConfigUnset(
+    configKey: string,
+    globalConfig?: boolean
+  ): Promise<boolean> {
     const output = await this.execGit(
-      ['config', '--local', '--unset-all', configKey],
+      [
+        'config',
+        globalConfig ? '--global' : '--local',
+        '--unset-all',
+        configKey
+      ],
       true
     )
     return output.exitCode === 0

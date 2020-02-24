@@ -17,7 +17,10 @@ export interface IGitAuthHelper {
   readonly tokenConfigKey: string
   readonly tokenConfigValue: string
   configureAuth(): Promise<void>
+  configureGlobalAuth(): Promise<void>
+  configureSubmoduleAuth(): Promise<void>
   removeAuth(): Promise<void>
+  remoteGlobalAuth(): Promise<void>
 }
 
 export function createAuthHelper(
@@ -32,6 +35,7 @@ class GitAuthHelper {
   private readonly settings: IGitSourceSettings
   private readonly sshCommandConfigKey = 'core.sshCommand'
   private readonly tokenPlaceholderConfigValue: string
+  private sshCommand = ''
   private sshKeyPath = ''
   private sshKnownHostsPath = ''
 
@@ -63,6 +67,65 @@ class GitAuthHelper {
     // Configure new values
     await this.configureSsh()
     await this.configureToken()
+  }
+
+  async configureGlobalAuth(): Promise<void> {
+    // Create a temp home directory
+    const runnerTemp = process.env['RUNNER_TEMP'] || ''
+    assert.ok(runnerTemp, 'RUNNER_TEMP is not defined')
+    const uniqueId = uuid()
+    const tempHome = path.join(runnerTemp, uniqueId)
+    await fs.promises.mkdir(tempHome, {recursive: true})
+
+    // Copy the global git config
+    const gitConfigPath = path.join(os.homedir(), '.gitconfig')
+    const newGitConfigPath = path.join(tempHome, '.gitconfig')
+    let configExists: boolean
+    try {
+      await fs.promises.stat(gitConfigPath)
+      configExists = true
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        configExists = false
+      }
+      throw err
+    }
+    if (configExists) {
+      await io.cp(gitConfigPath, newGitConfigPath)
+    } else {
+      await fs.promises.writeFile(newGitConfigPath, '')
+    }
+
+    // Configure the token
+    this.git.setEnvironmentVariable('HOME', tempHome)
+    try {
+      await this.configureToken(newGitConfigPath, true)
+    }
+    catch (err) {
+      // Unset in case written to the real global config
+      await this.git.tryConfigUnset(this.tokenConfigKey, true)
+      throw err
+    } finally {
+      this.git.removeEnvironmentVariable('HOME')
+    }
+  }
+
+  async configureSubmoduleAuth(): Promise<void> {
+    if (this.settings.persistCredentials) {
+      await this.git.submoduleForeach(
+        `git config "${this.tokenConfigKey}" "${this.tokenConfigValue}"`,
+        this.settings.nestedSubmodules
+      )
+      if (this.sshCommand) {
+        await this.git.submoduleForeach(
+          `git config "${this.sshCommandConfigKey}" '${this.sshCommand.replace(
+            /'/g,
+            "'\\''"
+          )}'`,
+          this.settings.nestedSubmodules
+        )
+      }
+    }
   }
 
   async removeAuth(): Promise<void> {
@@ -120,42 +183,49 @@ class GitAuthHelper {
 
     // Configure GIT_SSH_COMMAND
     const sshPath = await io.which('ssh', true)
-    let sshCommand = `"${sshPath}" -i "$RUNNER_TEMP/${path.basename(
+    this.sshCommand = `"${sshPath}" -i "$RUNNER_TEMP/${path.basename(
       this.sshKeyPath
     )}"`
     if (this.settings.sshStrict) {
-      sshCommand += ' -o StrictHostKeyChecking=yes -o CheckHostIP=no'
+      this.sshCommand += ' -o StrictHostKeyChecking=yes -o CheckHostIP=no'
     }
-    sshCommand += ` -o "UserKnownHostsFile=$RUNNER_TEMP/${path.basename(
+    this.sshCommand += ` -o "UserKnownHostsFile=$RUNNER_TEMP/${path.basename(
       this.sshKnownHostsPath
     )}"`
-    this.git.setEnvironmentVariable('GIT_SSH_COMMAND', sshCommand)
+    this.git.setEnvironmentVariable('GIT_SSH_COMMAND', this.sshCommand)
 
     // Configure core.sshCommand
     if (this.settings.persistCredentials) {
-      await this.git.config(this.sshCommandConfigKey, sshCommand)
+      await this.git.config(this.sshCommandConfigKey, this.sshCommand)
     }
   }
 
-  private async configureToken(): Promise<void> {
+  private async configureToken(configPath?: string, globalConfig?: boolean): Promise<void> {
+    // Validate args
+    assert.ok((configPath && globalConfig) || (!configPath && !globalConfig))
+
+    // Default config path
+    if (!configPath) {
+      configPath = path.join(
+        this.git.getWorkingDirectory(),
+        '.git',
+        'config'
+      )
+    }
+
     // Configure a placeholder value. This approach avoids the credential being captured
     // by process creation audit events, which are commonly logged. For more information,
     // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
-    await this.git.config(this.tokenConfigKey, this.tokenPlaceholderConfigValue)
+    await this.git.config(this.tokenConfigKey, this.tokenPlaceholderConfigValue, globalConfig)
 
-    // Replace the value in the config file
-    const configPath = path.join(
-      this.git.getWorkingDirectory(),
-      '.git',
-      'config'
-    )
+    // Replace the placeholder
     let content = (await fs.promises.readFile(configPath)).toString()
     const placeholderIndex = content.indexOf(this.tokenPlaceholderConfigValue)
     if (
       placeholderIndex < 0 ||
       placeholderIndex != content.lastIndexOf(this.tokenPlaceholderConfigValue)
     ) {
-      throw new Error('Unable to replace auth placeholder in .git/config')
+      throw new Error(`Unable to replace auth placeholder in ${configPath}`)
     }
     content = content.replace(
       this.tokenPlaceholderConfigValue,
