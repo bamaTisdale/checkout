@@ -132,8 +132,10 @@ export async function getSource(settings: IGitSourceSettings): Promise<void> {
           settings.nestedSubmodules,
           extraConfig
         )
-
-        // todo: Disable automatic garbage collection
+        await git.submoduleForeach(
+          'git config --local gc.auto 0',
+          settings.nestedSubmodules
+        )
 
         // Persist credentials
         if (settings.persistCredentials) {
@@ -141,7 +143,7 @@ export async function getSource(settings: IGitSourceSettings): Promise<void> {
         }
       } finally {
         // Remove temporary global config override
-        await authHelper.removeGlobalToken()
+        await authHelper.removeGlobalAuth()
       }
     }
 

@@ -5118,8 +5118,10 @@ exports.createAuthHelper = createAuthHelper;
 class GitAuthHelper {
     constructor(gitCommandManager, gitSourceSettings) {
         this.sshCommandConfigKey = 'core.sshCommand';
+        this.sshCommand = '';
         this.sshKeyPath = '';
         this.sshKnownHostsPath = '';
+        this.temporaryHomePath = '';
         this.tokenConfigKey = `http.https://${HOSTNAME}/.extraheader`;
         this.git = gitCommandManager;
         this.settings = gitSourceSettings || {};
@@ -5139,10 +5141,69 @@ class GitAuthHelper {
             yield this.configureToken();
         });
     }
+    configureGlobalAuth() {
+        return __awaiter(this, void 0, void 0, function* () {
+            // Create a temp home directory
+            const runnerTemp = process.env['RUNNER_TEMP'] || '';
+            assert.ok(runnerTemp, 'RUNNER_TEMP is not defined');
+            const uniqueId = v4_1.default();
+            this.temporaryHomePath = path.join(runnerTemp, uniqueId);
+            yield fs.promises.mkdir(this.temporaryHomePath, { recursive: true });
+            // Copy the global git config
+            const gitConfigPath = path.join(os.homedir(), '.gitconfig');
+            const newGitConfigPath = path.join(this.temporaryHomePath, '.gitconfig');
+            let configExists;
+            try {
+                yield fs.promises.stat(gitConfigPath);
+                configExists = true;
+            }
+            catch (err) {
+                if (err.code === 'ENOENT') {
+                    configExists = false;
+                }
+                throw err;
+            }
+            if (configExists) {
+                yield io.cp(gitConfigPath, newGitConfigPath);
+            }
+            else {
+                yield fs.promises.writeFile(newGitConfigPath, '');
+            }
+            // Configure the token
+            this.git.setEnvironmentVariable('HOME', this.temporaryHomePath);
+            try {
+                yield this.configureToken(newGitConfigPath, true);
+            }
+            catch (err) {
+                // Unset in case written to the real global config
+                yield this.git.tryConfigUnset(this.tokenConfigKey, true);
+                throw err;
+            }
+            finally {
+                this.git.removeEnvironmentVariable('HOME');
+            }
+        });
+    }
+    configureSubmoduleAuth() {
+        return __awaiter(this, void 0, void 0, function* () {
+            if (this.settings.persistCredentials) {
+                yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "${this.tokenConfigValue}"`, this.settings.nestedSubmodules);
+                if (this.sshCommand) {
+                    yield this.git.submoduleForeach(`git config "${this.sshCommandConfigKey}" '${this.sshCommand.replace(/'/g, "'\\''")}'`, this.settings.nestedSubmodules);
+                }
+            }
+        });
+    }
     removeAuth() {
         return __awaiter(this, void 0, void 0, function* () {
             yield this.removeSsh();
             yield this.removeToken();
+        });
+    }
+    removeGlobalAuth() {
+        return __awaiter(this, void 0, void 0, function* () {
+            this.git.removeEnvironmentVariable('HOME');
+            yield io.rmRF(this.temporaryHomePath);
         });
     }
     configureSsh() {
@@ -5187,31 +5248,36 @@ class GitAuthHelper {
             yield fs.promises.writeFile(this.sshKnownHostsPath, knownHosts);
             // Configure GIT_SSH_COMMAND
             const sshPath = yield io.which('ssh', true);
-            let sshCommand = `"${sshPath}" -i "$RUNNER_TEMP/${path.basename(this.sshKeyPath)}"`;
+            this.sshCommand = `"${sshPath}" -i "$RUNNER_TEMP/${path.basename(this.sshKeyPath)}"`;
             if (this.settings.sshStrict) {
-                sshCommand += ' -o StrictHostKeyChecking=yes -o CheckHostIP=no';
+                this.sshCommand += ' -o StrictHostKeyChecking=yes -o CheckHostIP=no';
             }
-            sshCommand += ` -o "UserKnownHostsFile=$RUNNER_TEMP/${path.basename(this.sshKnownHostsPath)}"`;
-            this.git.setEnvironmentVariable('GIT_SSH_COMMAND', sshCommand);
+            this.sshCommand += ` -o "UserKnownHostsFile=$RUNNER_TEMP/${path.basename(this.sshKnownHostsPath)}"`;
+            this.git.setEnvironmentVariable('GIT_SSH_COMMAND', this.sshCommand);
             // Configure core.sshCommand
             if (this.settings.persistCredentials) {
-                yield this.git.config(this.sshCommandConfigKey, sshCommand);
+                yield this.git.config(this.sshCommandConfigKey, this.sshCommand);
             }
         });
     }
-    configureToken() {
+    configureToken(configPath, globalConfig) {
         return __awaiter(this, void 0, void 0, function* () {
+            // Validate args
+            assert.ok((configPath && globalConfig) || (!configPath && !globalConfig), 'Unexpected configureToken parameter combinations');
+            // Default config path
+            if (!configPath) {
+                configPath = path.join(this.git.getWorkingDirectory(), '.git', 'config');
+            }
             // Configure a placeholder value. This approach avoids the credential being captured
             // by process creation audit events, which are commonly logged. For more information,
             // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
-            yield this.git.config(this.tokenConfigKey, this.tokenPlaceholderConfigValue);
-            // Replace the value in the config file
-            const configPath = path.join(this.git.getWorkingDirectory(), '.git', 'config');
+            yield this.git.config(this.tokenConfigKey, this.tokenPlaceholderConfigValue, globalConfig);
+            // Replace the placeholder
             let content = (yield fs.promises.readFile(configPath)).toString();
             const placeholderIndex = content.indexOf(this.tokenPlaceholderConfigValue);
             if (placeholderIndex < 0 ||
                 placeholderIndex != content.lastIndexOf(this.tokenPlaceholderConfigValue)) {
-                throw new Error('Unable to replace auth placeholder in .git/config');
+                throw new Error(`Unable to replace auth placeholder in ${configPath}`);
             }
             content = content.replace(this.tokenPlaceholderConfigValue, this.tokenConfigValue);
             yield fs.promises.writeFile(configPath, content);
@@ -5381,9 +5447,14 @@ class GitCommandManager {
             yield this.execGit(args);
         });
     }
-    config(configKey, configValue) {
+    config(configKey, configValue, globalConfig) {
         return __awaiter(this, void 0, void 0, function* () {
-            yield this.execGit(['config', '--local', configKey, configValue]);
+            yield this.execGit([
+                'config',
+                globalConfig ? '--global' : '--local',
+                configKey,
+                configValue
+            ]);
         });
     }
     configExists(configKey) {
@@ -5461,6 +5532,9 @@ class GitCommandManager {
             yield this.execGit(['remote', 'add', remoteName, remoteUrl]);
         });
     }
+    removeEnvironmentVariable(name) {
+        delete this.gitEnv[name];
+    }
     setEnvironmentVariable(name, value) {
         this.gitEnv[name] = value;
     }
@@ -5511,9 +5585,14 @@ class GitCommandManager {
             return output.exitCode === 0;
         });
     }
-    tryConfigUnset(configKey) {
+    tryConfigUnset(configKey, globalConfig) {
         return __awaiter(this, void 0, void 0, function* () {
-            const output = yield this.execGit(['config', '--local', '--unset-all', configKey], true);
+            const output = yield this.execGit([
+                'config',
+                globalConfig ? '--global' : '--local',
+                '--unset-all',
+                configKey
+            ], true);
             return output.exitCode === 0;
         });
     }
@@ -5706,58 +5785,68 @@ function getSource(settings) {
             core.info(`The repository will be downloaded using the GitHub REST API`);
             core.info(`To create a local Git repository instead, add Git ${gitCommandManager.MinimumGitVersion} or higher to the PATH`);
             yield githubApiHelper.downloadRepository(settings.authToken, settings.repositoryOwner, settings.repositoryName, settings.ref, settings.commit, settings.repositoryPath);
+            return;
         }
-        else {
-            // Save state for POST action
-            stateHelper.setRepositoryPath(settings.repositoryPath);
-            // Initialize the repository
-            if (!fsHelper.directoryExistsSync(path.join(settings.repositoryPath, '.git'))) {
-                yield git.init();
-                yield git.remoteAdd('origin', repositoryUrl);
+        // Save state for POST action
+        stateHelper.setRepositoryPath(settings.repositoryPath);
+        // Initialize the repository
+        if (!fsHelper.directoryExistsSync(path.join(settings.repositoryPath, '.git'))) {
+            yield git.init();
+            yield git.remoteAdd('origin', repositoryUrl);
+        }
+        // Disable automatic garbage collection
+        if (!(yield git.tryDisableAutomaticGarbageCollection())) {
+            core.warning(`Unable to turn off git automatic garbage collection. The git fetch operation may trigger garbage collection and cause a delay.`);
+        }
+        const authHelper = gitAuthHelper.createAuthHelper(git, settings);
+        try {
+            // Configure auth
+            yield authHelper.configureAuth();
+            // LFS install
+            if (settings.lfs) {
+                yield git.lfsInstall();
             }
-            // Disable automatic garbage collection
-            if (!(yield git.tryDisableAutomaticGarbageCollection())) {
-                core.warning(`Unable to turn off git automatic garbage collection. The git fetch operation may trigger garbage collection and cause a delay.`);
+            // Fetch
+            const refSpec = refHelper.getRefSpec(settings.ref, settings.commit);
+            yield git.fetch(settings.fetchDepth, refSpec);
+            // Checkout info
+            const checkoutInfo = yield refHelper.getCheckoutInfo(git, settings.ref, settings.commit);
+            // LFS fetch
+            // Explicit lfs-fetch to avoid slow checkout (fetches one lfs object at a time).
+            // Explicit lfs fetch will fetch lfs objects in parallel.
+            if (settings.lfs) {
+                yield git.lfsFetch(checkoutInfo.startPoint || checkoutInfo.ref);
             }
-            const authHelper = gitAuthHelper.createAuthHelper(git, settings);
-            try {
-                // Configure auth
-                yield authHelper.configureAuth();
-                // LFS install
-                if (settings.lfs) {
-                    yield git.lfsInstall();
-                }
-                // Fetch
-                const refSpec = refHelper.getRefSpec(settings.ref, settings.commit);
-                yield git.fetch(settings.fetchDepth, refSpec);
-                // Checkout info
-                const checkoutInfo = yield refHelper.getCheckoutInfo(git, settings.ref, settings.commit);
-                // LFS fetch
-                // Explicit lfs-fetch to avoid slow checkout (fetches one lfs object at a time).
-                // Explicit lfs fetch will fetch lfs objects in parallel.
-                if (settings.lfs) {
-                    yield git.lfsFetch(checkoutInfo.startPoint || checkoutInfo.ref);
-                }
-                // Checkout
-                yield git.checkout(checkoutInfo.ref, checkoutInfo.startPoint);
-                // Submodules
-                if (settings.submodules) {
+            // Checkout
+            yield git.checkout(checkoutInfo.ref, checkoutInfo.startPoint);
+            // Submodules
+            if (settings.submodules) {
+                try {
+                    // Temporarily override global config
+                    yield authHelper.configureGlobalAuth();
+                    // Checkout submodules
                     yield git.submoduleSync(settings.nestedSubmodules);
                     const extraConfig = {};
                     extraConfig[authHelper.tokenConfigKey] = authHelper.tokenConfigValue;
                     yield git.submoduleUpdate(settings.fetchDepth, settings.nestedSubmodules, extraConfig);
+                    yield git.submoduleForeach('git config --local gc.auto 0', settings.nestedSubmodules);
+                    // Persist credentials
                     if (settings.persistCredentials) {
-                        yield git.submoduleForeach(`git config "${authHelper.tokenConfigKey}" "${authHelper.tokenConfigValue}"`, settings.nestedSubmodules);
+                        yield authHelper.configureSubmoduleAuth();
                     }
                 }
-                // Dump some info about the checked out commit
-                yield git.log1();
-            }
-            finally {
-                // Remove auth
-                if (!settings.persistCredentials) {
-                    yield authHelper.removeAuth();
+                finally {
+                    // Remove temporary global config override
+                    yield authHelper.removeGlobalAuth();
                 }
+            }
+            // Dump some info about the checked out commit
+            yield git.log1();
+        }
+        finally {
+            // Remove auth
+            if (!settings.persistCredentials) {
+                yield authHelper.removeAuth();
             }
         }
     });
