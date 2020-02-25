@@ -5191,8 +5191,7 @@ class GitAuthHelper {
                 yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}"`, this.settings.nestedSubmodules);
                 // Replace the placeholder
                 const output = yield this.git.submoduleForeach(`git config --local --show-origin --name-only --get-regexp remote.origin.url`, this.settings.nestedSubmodules);
-                const configPaths = output.match(/(?<=(^|\n)file:)[^\n]+[^ ](?= +remote\.origin\.url)/g) ||
-                    [];
+                const configPaths = output.match(/(?<=(^|\n)file:)[^\t]+(?=\tremote\.origin\.url)/g) || [];
                 for (const configPath of configPaths) {
                     core.debug(`Replacing token placeholder in '${configPath}'`);
                     this.replaceTokenPlaceholder(configPath);

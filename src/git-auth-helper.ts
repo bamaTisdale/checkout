@@ -124,8 +124,7 @@ class GitAuthHelper {
         this.settings.nestedSubmodules
       )
       const configPaths: string[] =
-        output.match(/(?<=(^|\n)file:)[^\n]+[^ ](?= +remote\.origin\.url)/g) ||
-        []
+        output.match(/(?<=(^|\n)file:)[^\t]+(?=\tremote\.origin\.url)/g) || []
       for (const configPath of configPaths) {
         core.debug(`Replacing token placeholder in '${configPath}'`)
         this.replaceTokenPlaceholder(configPath)
