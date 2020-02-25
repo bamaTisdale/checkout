@@ -5185,7 +5185,7 @@ class GitAuthHelper {
     configureSubmoduleAuth() {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.settings.persistCredentials) {
-                yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "***" ; echo "name=$name" ; echo "sm_path=$sm_path" ; echo "displaypath=$displaypath" ; echo "sha1=$sha1" ; echo "toplevel=$toplevel"`, this.settings.nestedSubmodules);
+                yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}" ; echo "name=$name" ; echo "sm_path=$sm_path" ; echo "displaypath=$displaypath" ; echo "sha1=$sha1" ; echo "toplevel=$toplevel"`, this.settings.nestedSubmodules);
                 if (this.sshCommand) {
                     yield this.git.submoduleForeach(`git config "${this.sshCommandConfigKey}" '${this.sshCommand.replace(/'/g, "'\\''")}'`, this.settings.nestedSubmodules);
                 }

@@ -111,7 +111,7 @@ class GitAuthHelper {
   async configureSubmoduleAuth(): Promise<void> {
     if (this.settings.persistCredentials) {
       await this.git.submoduleForeach(
-        `git config "${this.tokenConfigKey}" "***" ; echo "name=$name" ; echo "sm_path=$sm_path" ; echo "displaypath=$displaypath" ; echo "sha1=$sha1" ; echo "toplevel=$toplevel"`,
+        `git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}" ; echo "name=$name" ; echo "sm_path=$sm_path" ; echo "displaypath=$displaypath" ; echo "sha1=$sha1" ; echo "toplevel=$toplevel"`,
         this.settings.nestedSubmodules
       )
       if (this.sshCommand) {
