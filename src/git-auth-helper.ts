@@ -127,6 +127,7 @@ class GitAuthHelper {
         output.match(/(?<=(^|\n)file:)[^\n]+[^ ](?= +remote\.origin\.url)/g) ||
         []
       for (const configPath of configPaths) {
+        core.debug(`Replacing token placeholder in '${configPath}'`)
         this.replaceTokenPlaceholder(configPath)
       }
 
