@@ -32,7 +32,7 @@ export interface IGitCommandManager {
   remoteAdd(remoteName: string, remoteUrl: string): Promise<void>
   removeEnvironmentVariable(name: string): void
   setEnvironmentVariable(name: string, value: string): void
-  submoduleForeach(command: string, recursive: boolean): Promise<void>
+  submoduleForeach(command: string, recursive: boolean): Promise<string>
   submoduleSync(recursive: boolean): Promise<void>
   submoduleUpdate(fetchDepth: number, recursive: boolean): Promise<void>
   tagExists(pattern: string): Promise<boolean>
@@ -242,17 +242,18 @@ class GitCommandManager {
     this.gitEnv[name] = value
   }
 
-  async submoduleForeach(command: string, recursive: boolean) {
+  async submoduleForeach(command: string, recursive: boolean): Promise<string> {
     const args = ['submodule', 'foreach']
     if (recursive) {
       args.push('--recursive')
     }
     args.push(command)
 
-    await this.execGit(args)
+    const output = await this.execGit(args)
+    return output.stdout
   }
 
-  async submoduleSync(recursive: boolean) {
+  async submoduleSync(recursive: boolean): Promise<void> {
     const args = ['submodule', 'sync']
     if (recursive) {
       args.push('--recursive')
@@ -261,7 +262,7 @@ class GitCommandManager {
     await this.execGit(args)
   }
 
-  async submoduleUpdate(fetchDepth: number, recursive: boolean) {
+  async submoduleUpdate(fetchDepth: number, recursive: boolean): Promise<void> {
     const args = ['-c', 'protocol.version=2']
     args.push('submodule', 'update', '--init', '--force')
     if (fetchDepth > 0) {

@@ -5185,7 +5185,17 @@ class GitAuthHelper {
     configureSubmoduleAuth() {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.settings.persistCredentials) {
-                yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}" ; echo "name=$name" ; echo "sm_path=$sm_path" ; echo "displaypath=$displaypath" ; echo "sha1=$sha1" ; echo "toplevel=$toplevel"`, this.settings.nestedSubmodules);
+                // Configure a placeholder value. This approach avoids the credential being captured
+                // by process creation audit events, which are commonly logged. For more information,
+                // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
+                yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}"`, this.settings.nestedSubmodules);
+                // Replace the placeholder
+                const output = yield this.git.submoduleForeach(`git config --local --show-origin --name-only --get-regexp remote.origin.url`, this.settings.nestedSubmodules);
+                const configPaths = output.match(/(?<=(^|\n)file:)[^\n]+[^ ](?= +remote\.origin\.url)/g) ||
+                    [];
+                for (const configPath of configPaths) {
+                    this.replaceTokenPlaceholder(configPath);
+                }
                 if (this.sshCommand) {
                     yield this.git.submoduleForeach(`git config "${this.sshCommandConfigKey}" '${this.sshCommand.replace(/'/g, "'\\''")}'`, this.settings.nestedSubmodules);
                 }
@@ -5264,7 +5274,7 @@ class GitAuthHelper {
             // Validate args
             assert.ok((configPath && globalConfig) || (!configPath && !globalConfig), 'Unexpected configureToken parameter combinations');
             // Default config path
-            if (!configPath) {
+            if (!configPath && !globalConfig) {
                 configPath = path.join(this.git.getWorkingDirectory(), '.git', 'config');
             }
             // Configure a placeholder value. This approach avoids the credential being captured
@@ -5272,12 +5282,19 @@ class GitAuthHelper {
             // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
             yield this.git.config(this.tokenConfigKey, this.tokenPlaceholderConfigValue, globalConfig);
             // Replace the placeholder
+            yield this.replaceTokenPlaceholder(configPath || '');
+        });
+    }
+    replaceTokenPlaceholder(configPath) {
+        return __awaiter(this, void 0, void 0, function* () {
+            assert.ok(configPath, 'configPath is not defined');
             let content = (yield fs.promises.readFile(configPath)).toString();
             const placeholderIndex = content.indexOf(this.tokenPlaceholderConfigValue);
             if (placeholderIndex < 0 ||
                 placeholderIndex != content.lastIndexOf(this.tokenPlaceholderConfigValue)) {
                 throw new Error(`Unable to replace auth placeholder in ${configPath}`);
             }
+            assert.ok(this.tokenConfigValue, 'tokenConfigValue is not defined');
             content = content.replace(this.tokenPlaceholderConfigValue, this.tokenConfigValue);
             yield fs.promises.writeFile(configPath, content);
         });
@@ -5550,7 +5567,8 @@ class GitCommandManager {
                 args.push('--recursive');
             }
             args.push(command);
-            yield this.execGit(args);
+            const output = yield this.execGit(args);
+            return output.stdout;
         });
     }
     submoduleSync(recursive) {

@@ -110,10 +110,26 @@ class GitAuthHelper {
 
   async configureSubmoduleAuth(): Promise<void> {
     if (this.settings.persistCredentials) {
+      // Configure a placeholder value. This approach avoids the credential being captured
+      // by process creation audit events, which are commonly logged. For more information,
+      // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
       await this.git.submoduleForeach(
-        `git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}" ; echo "name=$name" ; echo "sm_path=$sm_path" ; echo "displaypath=$displaypath" ; echo "sha1=$sha1" ; echo "toplevel=$toplevel"`,
+        `git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}"`,
         this.settings.nestedSubmodules
       )
+
+      // Replace the placeholder
+      const output = await this.git.submoduleForeach(
+        `git config --local --show-origin --name-only --get-regexp remote.origin.url`,
+        this.settings.nestedSubmodules
+      )
+      const configPaths: string[] =
+        output.match(/(?<=(^|\n)file:)[^\n]+[^ ](?= +remote\.origin\.url)/g) ||
+        []
+      for (const configPath of configPaths) {
+        this.replaceTokenPlaceholder(configPath)
+      }
+
       if (this.sshCommand) {
         await this.git.submoduleForeach(
           `git config "${this.sshCommandConfigKey}" '${this.sshCommand.replace(
@@ -215,7 +231,7 @@ class GitAuthHelper {
     )
 
     // Default config path
-    if (!configPath) {
+    if (!configPath && !globalConfig) {
       configPath = path.join(this.git.getWorkingDirectory(), '.git', 'config')
     }
 
@@ -229,6 +245,11 @@ class GitAuthHelper {
     )
 
     // Replace the placeholder
+    await this.replaceTokenPlaceholder(configPath || '')
+  }
+
+  private async replaceTokenPlaceholder(configPath: string): Promise<void> {
+    assert.ok(configPath, 'configPath is not defined')
     let content = (await fs.promises.readFile(configPath)).toString()
     const placeholderIndex = content.indexOf(this.tokenPlaceholderConfigValue)
     if (
@@ -237,6 +258,7 @@ class GitAuthHelper {
     ) {
       throw new Error(`Unable to replace auth placeholder in ${configPath}`)
     }
+    assert.ok(this.tokenConfigValue, 'tokenConfigValue is not defined')
     content = content.replace(
       this.tokenPlaceholderConfigValue,
       this.tokenConfigValue
