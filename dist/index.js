@@ -5188,9 +5188,8 @@ class GitAuthHelper {
                 // Configure a placeholder value. This approach avoids the credential being captured
                 // by process creation audit events, which are commonly logged. For more information,
                 // refer to https://docs.microsoft.com/en-us/windows-server/identity/ad-ds/manage/component-updates/command-line-process-auditing
-                yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}"`, this.settings.nestedSubmodules);
+                const output = yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "${this.tokenPlaceholderConfigValue}" && git config --local --show-origin --name-only --get-regexp remote.origin.url`, this.settings.nestedSubmodules);
                 // Replace the placeholder
-                const output = yield this.git.submoduleForeach(`git config --local --show-origin --name-only --get-regexp remote.origin.url`, this.settings.nestedSubmodules);
                 const configPaths = output.match(/(?<=(^|\n)file:)[^\t]+(?=\tremote\.origin\.url)/g) || [];
                 for (const configPath of configPaths) {
                     core.debug(`Replacing token placeholder in '${configPath}'`);
