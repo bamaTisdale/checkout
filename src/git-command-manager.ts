@@ -21,7 +21,7 @@ export interface IGitCommandManager {
     configValue: string,
     globalConfig?: boolean
   ): Promise<void>
-  configExists(configKey: string): Promise<boolean>
+  configExists(configKey: string, globalConfig?: boolean): Promise<boolean>
   fetch(fetchDepth: number, refSpec: string[]): Promise<void>
   getWorkingDirectory(): string
   init(): Promise<void>
@@ -34,10 +34,7 @@ export interface IGitCommandManager {
   setEnvironmentVariable(name: string, value: string): void
   submoduleForeach(command: string, recursive: boolean): Promise<void>
   submoduleSync(recursive: boolean): Promise<void>
-  submoduleUpdate(
-    fetchDepth: number,
-    recursive: boolean
-  ): Promise<void>
+  submoduleUpdate(fetchDepth: number, recursive: boolean): Promise<void>
   tagExists(pattern: string): Promise<boolean>
   tryClean(): Promise<boolean>
   tryConfigUnset(configKey: string, globalConfig?: boolean): Promise<boolean>
@@ -148,12 +145,21 @@ class GitCommandManager {
     ])
   }
 
-  async configExists(configKey: string): Promise<boolean> {
+  async configExists(
+    configKey: string,
+    globalConfig?: boolean
+  ): Promise<boolean> {
     const pattern = configKey.replace(/[^a-zA-Z0-9_]/g, x => {
       return `\\${x}`
     })
     const output = await this.execGit(
-      ['config', '--local', '--name-only', '--get-regexp', pattern],
+      [
+        'config',
+        globalConfig ? '--global' : '--local',
+        '--name-only',
+        '--get-regexp',
+        pattern
+      ],
       true
     )
     return output.exitCode === 0
@@ -255,14 +261,8 @@ class GitCommandManager {
     await this.execGit(args)
   }
 
-  async submoduleUpdate(
-    fetchDepth: number,
-    recursive: boolean
-  ) {
+  async submoduleUpdate(fetchDepth: number, recursive: boolean) {
     const args = ['-c', 'protocol.version=2']
-    // for (const key of Object.keys(config)) {
-    //   args.push('-c', `${key}=${config[key]}`)
-    // }
     args.push('submodule', 'update', '--init', '--force')
     if (fetchDepth > 0) {
       args.push(`--depth=${fetchDepth}`)

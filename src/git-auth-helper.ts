@@ -14,8 +14,6 @@ const IS_WINDOWS = process.platform === 'win32'
 const HOSTNAME = 'github.com'
 
 export interface IGitAuthHelper {
-  // readonly tokenConfigKey: string
-  // readonly tokenConfigValue: string
   configureAuth(): Promise<void>
   configureGlobalAuth(): Promise<void>
   configureSubmoduleAuth(): Promise<void>
@@ -34,15 +32,12 @@ class GitAuthHelper {
   private readonly git: IGitCommandManager
   private readonly settings: IGitSourceSettings
   private readonly sshCommandConfigKey = 'core.sshCommand'
+  private readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
   private readonly tokenPlaceholderConfigValue: string
   private sshCommand = ''
   private sshKeyPath = ''
   private sshKnownHostsPath = ''
   private temporaryHomePath = ''
-
-  // readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
-  // readonly tokenConfigValue: string
-  private readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
   private tokenConfigValue: string
 
   constructor(
@@ -93,6 +88,7 @@ class GitAuthHelper {
       }
     }
     if (configExists) {
+      core.info(`Copying '${gitConfigPath}' to '${newGitConfigPath}'`)
       await io.cp(gitConfigPath, newGitConfigPath)
     } else {
       await fs.promises.writeFile(newGitConfigPath, '')
@@ -100,6 +96,9 @@ class GitAuthHelper {
 
     // Configure the token
     try {
+      core.info(
+        `Temporarily overriding HOME='${this.temporaryHomePath}' before making global git config changes`
+      )
       this.git.setEnvironmentVariable('HOME', this.temporaryHomePath)
       await this.configureToken(newGitConfigPath, true)
     } catch (err) {
@@ -112,7 +111,7 @@ class GitAuthHelper {
   async configureSubmoduleAuth(): Promise<void> {
     if (this.settings.persistCredentials) {
       await this.git.submoduleForeach(
-        `git config "${this.tokenConfigKey}" "${this.tokenConfigValue}"`,
+        `git config "${this.tokenConfigKey}" "***" ; echo "name=$name" ; echo "sm_path=$sm_path" ; echo "displaypath=$displaypath" ; echo "sha1=$sha1" ; echo "toplevel=$toplevel"`,
         this.settings.nestedSubmodules
       )
       if (this.sshCommand) {
@@ -133,6 +132,7 @@ class GitAuthHelper {
   }
 
   async removeGlobalAuth(): Promise<void> {
+    core.info(`Unsetting HOME override`)
     this.git.removeEnvironmentVariable('HOME')
     await io.rmRF(this.temporaryHomePath)
   }

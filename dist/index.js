@@ -5118,13 +5118,11 @@ exports.createAuthHelper = createAuthHelper;
 class GitAuthHelper {
     constructor(gitCommandManager, gitSourceSettings) {
         this.sshCommandConfigKey = 'core.sshCommand';
+        this.tokenConfigKey = `http.https://${HOSTNAME}/.extraheader`;
         this.sshCommand = '';
         this.sshKeyPath = '';
         this.sshKnownHostsPath = '';
         this.temporaryHomePath = '';
-        // readonly tokenConfigKey: string = `http.https://${HOSTNAME}/.extraheader`
-        // readonly tokenConfigValue: string
-        this.tokenConfigKey = `http.https://${HOSTNAME}/.extraheader`;
         this.git = gitCommandManager;
         this.settings = gitSourceSettings || {};
         // Token auth header
@@ -5165,6 +5163,7 @@ class GitAuthHelper {
                 }
             }
             if (configExists) {
+                core.info(`Copying '${gitConfigPath}' to '${newGitConfigPath}'`);
                 yield io.cp(gitConfigPath, newGitConfigPath);
             }
             else {
@@ -5172,6 +5171,7 @@ class GitAuthHelper {
             }
             // Configure the token
             try {
+                core.info(`Temporarily overriding HOME='${this.temporaryHomePath}' before making global git config changes`);
                 this.git.setEnvironmentVariable('HOME', this.temporaryHomePath);
                 yield this.configureToken(newGitConfigPath, true);
             }
@@ -5185,7 +5185,7 @@ class GitAuthHelper {
     configureSubmoduleAuth() {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.settings.persistCredentials) {
-                yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "${this.tokenConfigValue}"`, this.settings.nestedSubmodules);
+                yield this.git.submoduleForeach(`git config "${this.tokenConfigKey}" "***" ; echo "name=$name" ; echo "sm_path=$sm_path" ; echo "displaypath=$displaypath" ; echo "sha1=$sha1" ; echo "toplevel=$toplevel"`, this.settings.nestedSubmodules);
                 if (this.sshCommand) {
                     yield this.git.submoduleForeach(`git config "${this.sshCommandConfigKey}" '${this.sshCommand.replace(/'/g, "'\\''")}'`, this.settings.nestedSubmodules);
                 }
@@ -5200,6 +5200,7 @@ class GitAuthHelper {
     }
     removeGlobalAuth() {
         return __awaiter(this, void 0, void 0, function* () {
+            core.info(`Unsetting HOME override`);
             this.git.removeEnvironmentVariable('HOME');
             yield io.rmRF(this.temporaryHomePath);
         });
@@ -5455,12 +5456,18 @@ class GitCommandManager {
             ]);
         });
     }
-    configExists(configKey) {
+    configExists(configKey, globalConfig) {
         return __awaiter(this, void 0, void 0, function* () {
             const pattern = configKey.replace(/[^a-zA-Z0-9_]/g, x => {
                 return `\\${x}`;
             });
-            const output = yield this.execGit(['config', '--local', '--name-only', '--get-regexp', pattern], true);
+            const output = yield this.execGit([
+                'config',
+                globalConfig ? '--global' : '--local',
+                '--name-only',
+                '--get-regexp',
+                pattern
+            ], true);
             return output.exitCode === 0;
         });
     }
@@ -5558,9 +5565,6 @@ class GitCommandManager {
     submoduleUpdate(fetchDepth, recursive) {
         return __awaiter(this, void 0, void 0, function* () {
             const args = ['-c', 'protocol.version=2'];
-            // for (const key of Object.keys(config)) {
-            //   args.push('-c', `${key}=${config[key]}`)
-            // }
             args.push('submodule', 'update', '--init', '--force');
             if (fetchDepth > 0) {
                 args.push(`--depth=${fetchDepth}`);
@@ -5824,8 +5828,6 @@ function getSource(settings) {
                     yield authHelper.configureGlobalAuth();
                     // Checkout submodules
                     yield git.submoduleSync(settings.nestedSubmodules);
-                    // const extraConfig: {[key: string]: string} = {}
-                    // extraConfig[authHelper.tokenConfigKey] = authHelper.tokenConfigValue
                     yield git.submoduleUpdate(settings.fetchDepth, settings.nestedSubmodules);
                     yield git.submoduleForeach('git config --local gc.auto 0', settings.nestedSubmodules);
                     // Persist credentials
